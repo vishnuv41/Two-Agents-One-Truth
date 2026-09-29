@@ -9,6 +9,7 @@ button.p{background:#5b3fd6;color:#fff;border:0}.row{display:flex;gap:8px;flex-w
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border-radius:8px;padding:12px;margin-bottom:10px}.A{border-left:4px solid var(--a)}.B{border-left:4px solid var(--b)}
 .ev{font-family:monospace;font-size:13px;margin:4px 0}.rd{font-weight:700;margin-top:8px}.res{background:#1f8a4c;color:#fff;padding:12px;border-radius:8px;font-weight:600}
+.tag{display:inline-block;padding:2px 6px;border-radius:4px;background:#5b3fd6;color:#fff;font-size:11px;font-weight:700;margin-bottom:6px}
 </style></head><body>
 <h2>Two Agents, One Truth</h2>
 <p>Describe a conflict: two sources or agents that disagree about the same fact. Agent A trusts reliable sources; Agent B trusts recent evidence. MeTTa rules negotiate; the LLM only extracts and narrates.</p>
@@ -16,27 +17,34 @@ button.p{background:#5b3fd6;color:#fff;border:0}.row{display:flex;gap:8px;flex-w
 <div class="row"><button class="p" onclick="go()">Resolve</button>
 <select id="ex" onchange="if(this.value)$('tx').value=this.value"><option value="">Load an example (line format works without an LLM)</option></select>
 <button onclick="rst()">Reset memory</button><span id="err" style="color:#c00"></span></div>
-<div class="grid"><div><h3>Debate</h3><div id="deb"></div><div id="res"></div><p id="nar"></p><div id="hum"></div>
+<div class="grid"><div><h3>Current Debate</h3><div id="deb"></div><div id="res"></div><p id="nar"></p><div id="hum"></div>
 <details><summary>Show me why (raw MeTTa trace)</summary><div class="card" id="tr"></div></details></div>
-<div><h3>Memory &amp; rule diff</h3><div class="card" id="mem"></div></div></div>
+<div><h3>Context Memory &amp; Rule Diff</h3><div id="ctx-active"></div><div class="card" id="mem"></div></div></div>
 <script>
 const $=i=>document.getElementById(i),sleep=ms=>new Promise(r=>setTimeout(r,ms)),esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const EX={"Electronics (85C vs 75C)":"topic: max-temp\ncontext: electronics\nA: 85c-ok\nB: unsafe-above-75c\nA evidence: manufacturer-spec, datasheet, 300, 0.8\nB evidence: field-test, failures-at-75c, 4, 0.7\ncondition: unsafe-above-75c, ambient-above-75c",
 "College deadline":"topic: registration-close\ncontext: college\nA: friday\nB: thursday\nA evidence: official-site, website-banner, 120, 0.9\nB evidence: dept-notice, email-notice, 3, 0.6\nB evidence: dept-notice, poster, 2, 0.6",
 "Crop timing":"topic: sow\ncontext: agriculture\nA: now\nB: wait-7d\nA evidence: govt-calendar, window-open, 25, 0.8\nB evidence: soil-sensor, moisture-24pct, 1, 0.7\ncondition: wait-7d, moisture-below-30pct"};
 $('ex').innerHTML+=Object.keys(EX).map(k=>`<option value="${esc(EX[k])}">${k}</option>`).join('');
-async function go(){$('err').textContent='';['deb','res','nar','tr','hum'].forEach(k=>$(k).innerHTML='');
+async function go(){$('err').textContent='';['deb','res','nar','tr','hum','ctx-active'].forEach(k=>$(k).innerHTML='');
  const r=await fetch('/conflict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tx').value})});const d=await r.json();
  if(d.error){$('err').textContent=d.error;return}
+ if(d.context)$('ctx-active').innerHTML=`<span class="tag">Active Context: ${esc(d.context)}</span>`;
  let last=0;for(const e of d.events.slice().sort((a,b)=>a.round-b.round)){
   if(e.round!==last){last=e.round;$('deb').innerHTML+=`<div class="rd">Round ${e.round}: ${['','ASSERT','CHALLENGE','WEIGH','RESOLVE','LEARN'][e.round]}</div>`}
   $('tr').innerHTML+=`<div class="ev">[R${e.round} ${e.kind}] ${esc(e.text)}</div>`;
   $('deb').innerHTML+=`<div class="card ${e.agent||''}">${e.agent?'<b>Agent '+e.agent+'</b><br>':''}${esc(e.text)}</div>`;await sleep(350)}
  $('res').innerHTML=`<div class="res">${esc(d.resolution.text)}</div>`;$('nar').textContent=d.narrative;
- if(d.resolution.type==='escalate')$('hum').innerHTML=`Human decision: <input id="hv" placeholder="winning value"> <button onclick="hd('${d.topic}','${d.context}')">Submit</button>`;
- showMem(d.memory)}
-async function hd(t,c){const v=$('hv').value.trim();if(v)showMem(await (await fetch(`/human/${encodeURIComponent(t)}/${encodeURIComponent(v)}?context=${encodeURIComponent(c)}`,{method:'POST'})).json())}
-function showMem(m){$('mem').innerHTML=Object.entries(m.ctx).map(([c,v])=>`<b>${esc(c)}</b> reliability<br>`+Object.entries(v.reliability).map(([k,x])=>`<div class="ev">${esc(k)}: ${x}</div>`).join('')+Object.entries(v.learned).map(([k,x])=>`<div class="ev">rule ${esc(k)} v${x.version}: ${esc(x.type)} ${esc(x.value)}</div>`).join('')).join('')+'<b>Rule diff</b><br>'+(m.diffs.map(x=>`<div class="ev">${esc(x.what)}: ${esc(x.old)} → ${esc(x.new)}</div>`).join('')||'none yet')}
-async function rst(){await fetch('/reset',{method:'POST'});['deb','res','nar','tr','hum'].forEach(k=>$(k).innerHTML='');showMem({ctx:{},diffs:[]})}
+ if(d.resolution.type==='escalate'){
+   const ca = d.scenario_def.claims.A.value, cb = d.scenario_def.claims.B.value;
+   $('hum').innerHTML = `<div class="card" style="border:2px solid var(--b)"><b>⚠️ Human Review Required</b><br><small>Scores fall within uncertainty margin (< 25% gap). Select resolution:</small><div class="row" style="margin-top:6px"><button onclick="hd('${d.topic}','${ca}','${d.context}')">Claim A: ${esc(ca)}</button><button onclick="hd('${d.topic}','${cb}','${d.context}')">Claim B: ${esc(cb)}</button></div><div class="row" style="margin-top:4px"><input id="hv" placeholder="Or enter custom resolution value"> <button class="p" onclick="const v=$('hv').value.trim();if(v)hd('${d.topic}',v,'${d.context}')">Submit Decision</button></div></div>`;
+ }
+ showMem(d.memory, d.context)}
+async function hd(t,v,c){if(v)showMem(await (await fetch(`/human/${encodeURIComponent(t)}/${encodeURIComponent(v)}?context=${encodeURIComponent(c)}`,{method:'POST'})).json(), c)}
+function showMem(m, activeCtx){
+ let html = Object.entries(m.ctx||{}).map(([c,v])=>`<div style="${c===activeCtx?'font-weight:700;color:var(--a)':''}"><b>Domain: ${esc(c)}</b></div>`+Object.entries(v.reliability).map(([k,x])=>`<div class="ev">${esc(k)}: ${x}</div>`).join('')+Object.entries(v.learned).map(([k,x])=>`<div class="ev">rule ${esc(k)} v${x.version}: ${esc(x.type)} ${esc(x.value)}</div>`).join('')).join('');
+ $('mem').innerHTML=(html||'No stored domain rules yet.')+'<br><b>Rule diff</b><br>'+(m.diffs.map(x=>`<div class="ev">${esc(x.what)}: ${esc(x.old)} → ${esc(x.new)}</div>`).join('')||'none yet')
+}
+async function rst(){await fetch('/reset',{method:'POST'});['deb','res','nar','tr','hum','ctx-active'].forEach(k=>$(k).innerHTML='');showMem({ctx:{},diffs:[]})}
 fetch('/memory').then(r=>r.json()).then(showMem)
 </script></body></html>

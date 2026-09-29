@@ -55,12 +55,19 @@ def run_scenario(sc):
         l = cm["learned"][t]; m.run(f"(learned-rule {t} {l['type']} {l['value']} {l['cond']})")
     for ag in "AB": emit("assert", f"Agent {ag} ({sc['personas'][ag]}) claims {t} = {cl[ag]['value']}", agent=ag)
     for ag in "AB":
+        opp = "B" if ag == "A" else "A"
         for x in sc["evidence"]:
-            if x["claim"] == cl[ag]["id"]:
+            if x["claim"] == cl[opp]["id"]:
                 age = x["age"]
                 src = x["source"]
-                emit("challenge", f"{ag} evidence: {src} '{x['obs']}' age {age}d -> reliability "
-                     f"{cm['reliability'][src]}, recency {num(q(m, f'(rec {age})')):.1f}", agent=ag)
+                rel = cm["reliability"].get(src, 0.6)
+                rec = num(q(m, f'(rec {age})'))
+                if age > 7:
+                    emit("challenge", f"Agent {ag} challenges Agent {opp}: source '{src}' is {age}d old (recency {rec:.1f}); current conditions may differ", agent=ag)
+                elif rel < 0.8:
+                    emit("challenge", f"Agent {ag} challenges Agent {opp}: source '{src}' has lower reliability rating ({rel:.2f})", agent=ag)
+                else:
+                    emit("challenge", f"Agent {ag} challenges Agent {opp}: evidence '{src}' ({x['obs']}) evaluated under {ag}'s lens", agent=ag)
     for ag in "AB":
         la = num(q(m, f"(lens {ag} {cl['A']['id']})")); lb = num(q(m, f"(lens {ag} {cl['B']['id']})"))
         emit("lens", f"Lens {ag} ({sc['personas'][ag]}): claim A={la:.2f}, claim B={lb:.2f} -> prefers {'A' if la > lb else 'B' if lb > la else 'neither'}", agent=ag)
@@ -152,7 +159,7 @@ def validate(sc):
 SCHEMA = ('Return ONLY JSON: {"topic":str,"context":short-domain-kebab (e.g. college,electronics),"claims":{"A":{"id":"a","value":str},"B":{"id":"b","value":str}},'
  '"evidence":[{"claim":"a"|"b","source":str,"obs":str,"age":days_int}],"reliability":{source:0..1},'
  '"condition":{"value":str,"test":str}|null}. Agent A is an evidence advocate holding one position; agent B a skeptical '
- 'auditor holding the conflicting position. Use short kebab-case values. Do not decide who is right.')
+ 'auditor holding the conflicting position. Use descriptive kebab-case strings for claims and condition values (e.g. "environmentally-preferable", "lifecycle-emissions-lower"). Do not decide who is right.')
 
 def _llm_json(text):
     key, base, model = os.getenv("LLM_KEY"), os.getenv("LLM_BASE_URL"), os.getenv("LLM_MODEL")
