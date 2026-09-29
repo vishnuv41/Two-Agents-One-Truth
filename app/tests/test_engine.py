@@ -17,3 +17,41 @@ def test_text_intake_and_injection_safe():
 def test_bad_text_rejected():
     import pytest as p
     with p.raises(ValueError): engine.intake("hello")
+
+def T(topic, a, b, ea, eb, cond=None, ctx=None, ra=0.8, rb=0.8):
+    d = {"topic": topic, "context": ctx or topic, "claims": {"A": {"id": "a", "value": a}, "B": {"id": "b", "value": b}},
+         "evidence": [dict(claim="a", **x) for x in ea] + [dict(claim="b", **x) for x in eb],
+         "reliability": {x["source"]: ra for x in ea} | {x["source"]: rb for x in eb}}
+    if cond: d["condition"] = {"value": cond[0], "test": cond[1]}
+    return d
+E = lambda s, age, o="o": {"source": s, "obs": o, "age": age}
+def kind(sc): return engine.run_scenario(sc)["resolution"]["type"]
+
+def test_matrix_strong_a_and_b():
+    assert kind(T("t1", "x", "y", [E("m1", 1), E("m2", 2)], [E("w", 400)])) == "concede"
+    r = engine.run_scenario(T("t2", "x", "y", [E("p", 400)], [E("q", 1), E("r", 2)]))
+    assert "concedes" in r["resolution"]["text"]
+def test_matrix_close_condition_vs_none():
+    assert kind(T("t3", "85c", "75c", [E("spec", 20)], [E("test", 20)], cond=("75c", "failures-above-75c"))) == "conditional"
+    assert kind(T("t4", "x", "y", [E("s1", 20)], [E("s2", 20)])) == "escalate"
+def test_matrix_same_claim_no_conflict():
+    assert kind(T("t5", "friday", "friday", [E("web", 3)], [E("notice", 3)])) == "agree"
+def test_matrix_missing_evidence_escalates():
+    assert kind(T("t6", "x", "y", [E("s1", 3)], [])) == "escalate"
+def test_matrix_human_then_memory():
+    engine.run_scenario(T("t7", "x", "y", [E("s1", 20)], [E("s2", 20)]))
+    engine.human("t7", "x"); r = engine.run_scenario(T("t7", "x", "y", [E("s1", 20)], [E("s2", 20)]))
+    assert r["rule_hit"] and r["resolution"]["value"] == "x"
+def test_matrix_new_domains_generic():
+    for i, (a, b, ctx) in enumerate([("85c", "75c", "electronics"), ("fri", "thu", "college"), ("monolith", "microservices", "software")]):
+        assert kind(T(f"d{i}", a, b, [E("official", 5)], [E("field", 2), E("field", 3)], ctx=ctx)) in ("concede", "conditional", "escalate")
+def test_context_scoping():
+    engine.run_scenario(T("u1", "x", "y", [E("official", 2)], [E("field", 400)], ctx="c1"))
+    mem = engine.load_mem(); assert "official" in mem["ctx"]["c1"]["reliability"]
+    engine.run_scenario(T("u2", "x", "y", [E("official", 2)], [E("field", 400)], ctx="c2"))
+    assert engine.load_mem()["ctx"]["c2"]["reliability"]["official"] == 0.8  # c1 learning did not leak
+def test_five_rounds():
+    assert {e["round"] for e in engine.run("crop")["events"]} == {1, 2, 3, 4, 5}
+def test_malformed_input():
+    import pytest as p
+    with p.raises(Exception): engine.validate({"topic": "x", "claims": {}, "evidence": []})

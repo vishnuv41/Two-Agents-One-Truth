@@ -18,11 +18,13 @@ def scenarios():
     return out
 
 def load_mem():
-    if os.path.exists(MEM): return json.load(open(MEM))
-    return {"reliability": {}, "learned": {}, "diffs": [], "runs": 0}
+    if os.path.exists(MEM):
+        m = json.load(open(MEM))
+        if "ctx" in m: return m
+    return {"ctx": {}, "history": [], "diffs": [], "runs": 0}
 
 def save_mem(m):
-    json.dump(m, open(MEM, "w"), indent=2)
+    os.makedirs(os.path.dirname(MEM), exist_ok=True); json.dump(m, open(MEM, "w"), indent=2)
 
 def reset():
     if os.path.exists(MEM): os.remove(MEM)
@@ -32,78 +34,79 @@ def q(m, expr):
     return r[0][0] if r and r[0] else None
 
 def num(a): return float(str(a))
+import time
+ROUND = {"assert": 1, "conflict": 1, "challenge": 2, "lens": 3, "weigh": 3, "rule": 4, "resolve": 4, "learn": 5}
 
-def run(sid):
-    return run_scenario(scenarios()[sid])
+def run(sid): return run_scenario(scenarios()[sid])
 
 def run_scenario(sc):
-    sc = validate(sc); sid = sc["id"]; mem = load_mem(); ev = []
-    def emit(kind, text, **kw): ev.append({"kind": kind, "text": text, **kw})
-    for s, r in sc["reliability"].items(): mem["reliability"].setdefault(s, r)
+    """5 rounds: assert, challenge, weigh, resolve, learn. Every decision is a MeTTa query."""
+    sc = validate(sc); t = sc["topic"]; ctx = sc["context"]; cl = sc["claims"]
+    mem = load_mem(); cm = mem["ctx"].setdefault(ctx, {"reliability": {}, "learned": {}}); ev = []; diffs = []
+    def emit(kind, text, **kw): ev.append({"kind": kind, "round": ROUND[kind], "text": text, **kw})
+    for s, r in sc["reliability"].items(): cm["reliability"].setdefault(s, r)
     m = MeTTa(); m.run(open(os.path.join(ROOT, "core", "weigh.metta")).read())
-    for s, r in mem["reliability"].items(): m.run(f"(reliability {s} {r})")
-    t = sc["topic"]; cl = sc["claims"]
+    for s, r in cm["reliability"].items(): m.run(f"(reliability {s} {r})")
     for ag, c in cl.items(): m.run(f"(claim {ag} {t} {c['value']} {c['id']})")
-    for e in sc["evidence"]: m.run(f"(evidence {e['claim']} {e['source']} {e['obs']} {e['age']})")
+    for x in sc["evidence"]: m.run(f"(evidence {x['claim']} {x['source']} {x['obs']} {x['age']})")
     if sc.get("condition"): m.run(f"(condition {t} {sc['condition']['value']} {sc['condition']['test']})")
-    if t in mem["learned"]:
-        l = mem["learned"][t]; m.run(f"(learned-rule {t} {l['type']} {l['value']} {l['cond']})")
-    emit("assert", f"Agent A ({sc['personas']['A']}) claims {t} = {cl['A']['value']}", agent="A")
-    emit("assert", f"Agent B ({sc['personas']['B']}) claims {t} = {cl['B']['value']}", agent="B")
-    conflict = cl["A"]["value"] != cl["B"]["value"]
-    emit("conflict", "CONFLICT DETECTED" if conflict else "No conflict: agents agree")
+    rule_hit = t in cm["learned"]
+    if rule_hit:
+        l = cm["learned"][t]; m.run(f"(learned-rule {t} {l['type']} {l['value']} {l['cond']})")
+    for ag in "AB": emit("assert", f"Agent {ag} ({sc['personas'][ag]}) claims {t} = {cl[ag]['value']}", agent=ag)
     for ag in "AB":
-        for e in sc["evidence"]:
-            if e["claim"] == cl[ag]["id"]:
-                age = e["age"]
-                src = e["source"]
-                emit("challenge", f"{ag} evidence: {src} '{e['obs']}' age {age}d "
-                     f"-> reliability {mem['reliability'][src]}, recency {num(q(m, f'(rec {age})')):.1f}", agent=ag)
+        for x in sc["evidence"]:
+            if x["claim"] == cl[ag]["id"]:
+                age = x["age"]
+                src = x["source"]
+                emit("challenge", f"{ag} evidence: {src} '{x['obs']}' age {age}d -> reliability "
+                     f"{cm['reliability'][src]}, recency {num(q(m, f'(rec {age})')):.1f}", agent=ag)
     for ag in "AB":
         la = num(q(m, f"(lens {ag} {cl['A']['id']})")); lb = num(q(m, f"(lens {ag} {cl['B']['id']})"))
         emit("lens", f"Lens {ag} ({sc['personas'][ag]}): claim A={la:.2f}, claim B={lb:.2f} -> prefers {'A' if la > lb else 'B' if lb > la else 'neither'}", agent=ag)
     sa = num(q(m, f"(support {cl['A']['id']})")); sb = num(q(m, f"(support {cl['B']['id']})"))
     emit("weigh", f"support(A)={sa:.2f}  support(B)={sb:.2f}  [avg of both agents' lenses]", sa=sa, sb=sb)
-    d = str(q(m, f"(decide {t} {cl['A']['id']} {cl['B']['id']} {sa} {sb})")).strip("()").split()
-    rule_hit = t in mem["learned"]
-    if d[0] == "learned":
-        d = ["conditional", d[2], d[3]] if d[1] == "conditional" else ["applied", d[2]]
-    kind = d[0]; resolution = {"type": kind}
-    if rule_hit: emit("rule", f"Learned rule from a previous run applied -> converged without re-arguing")
-    if kind == "concede":
-        loser, wid = d[1], d[2]
-        win = "B" if loser == "A" else "A"
-        val = cl[win]["value"]
-        resolution.update(value=val, text=f"Agent {loser} concedes to Agent {win}: {t} = {val}")
-        if not rule_hit:
-            for e in sc["evidence"]:
-                dl = 0.05 if e["claim"] == cl[win]["id"] else -0.05
-                new = num(q(m, f"(adjust {mem['reliability'][e['source']]} {dl})"))
-                if abs(new - mem["reliability"][e["source"]]) > 1e-9:
-                    mem["diffs"].append({"what": f"reliability[{e['source']}]", "old": mem["reliability"][e["source"]], "new": round(new, 3)})
-                    mem["reliability"][e["source"]] = round(new, 3)
-            mem["learned"][t] = {"type": "concede", "value": val, "cond": "none"}
-            mem["diffs"].append({"what": f"rule[{t}]", "old": None, "new": f"concede -> {val}"})
+    d = str(q(m, f"(verdict {cl['A']['value']} {cl['B']['value']} {t} {cl['A']['id']} {cl['B']['id']} {sa} {sb})")).strip("()").split()
+    if d[0] == "learned": d = ["conditional", d[2], d[3]] if d[1] == "conditional" else ["applied", d[2]]
+    kind = d[0]; res = {"type": kind}
+    emit("conflict", "No conflict: both agents agree" if kind == "agree" else "CONFLICT DETECTED")
+    if rule_hit and kind in ("conditional", "applied"): emit("rule", "Learned rule from an earlier run applied: converged without re-arguing")
+    def learn_rule(ty, val, cond):
+        old = cm["learned"].get(t); ver = (old["version"] + 1) if old else 1
+        cm["learned"][t] = {"type": ty, "value": val, "cond": cond, "version": ver, "ts": int(time.time())}
+        diffs.append({"what": f"rule[{ctx}/{t}] v{ver}", "old": (old or {}).get("type") and f"{old['type']} {old['value']}", "new": f"{ty} {val} ({cond})"})
+    if kind == "agree": res["text"] = f"Agents already agree: {t} = {cl['A']['value']}"
+    elif kind == "concede":
+        loser = d[1]; win = "B" if loser == "A" else "A"; val = cl[win]["value"]
+        res.update(value=val, text=f"Agent {loser} concedes to Agent {win}: {t} = {val}")
+        for x in sc["evidence"]:
+            dl = 0.05 if x["claim"] == cl[win]["id"] else -0.05; old = cm["reliability"][x["source"]]
+            new = round(num(q(m, f"(adjust {old} {dl})")), 3)
+            if new != old: cm["reliability"][x["source"]] = new; diffs.append({"what": f"reliability[{ctx}/{x['source']}]", "old": old, "new": new})
+        learn_rule("concede", val, "none")
     elif kind == "conditional":
-        val, cond = d[1], d[2]
-        resolution.update(value=val, cond=cond, text=f"Conditional truth: {t} = {val}, subject to {cond}; otherwise follow the other agent's claim")
-        if not rule_hit:
-            mem["learned"][t] = {"type": "conditional", "value": val, "cond": cond}
-            mem["diffs"].append({"what": f"rule[{t}]", "old": None, "new": f"conditional {val} if {cond}"})
+        res.update(value=d[1], cond=d[2], text=f"Conditional truth: {t} = {d[1]} if {d[2]}; otherwise follow the other agent's claim")
+        if not rule_hit: learn_rule("conditional", d[1], d[2])
     elif kind == "applied":
-        resolution.update(type="concede", value=d[1], text=f"Both agents apply the learned rule: {t} = {d[1]} (no re-argument needed)")
-    elif kind == "escalate":
-        resolution["text"] = "Scores too close and no condition known: ESCALATED to a human reviewer"
-    emit("resolve", resolution["text"], resolution=resolution)
-    mem["runs"] += 1; save_mem(mem)
-    narr = narrate(ev)
-    return {"scenario": sid, "events": ev, "resolution": resolution, "narrative": narr,
-            "rule_hit": rule_hit, "memory": mem, "topic": t, "scenario_def": sc}
+        res.update(type="concede", value=d[1], text=f"Both agents apply the learned rule: {t} = {d[1]}")
+    else:
+        res["type"] = "escalate"
+        res["text"] = ("One side has no evidence" if kind == "escalate-missing" else "Scores too close and no usable condition") + ": ESCALATED to a human reviewer"
+    emit("resolve", res["text"], resolution=res)
+    emit("learn", "; ".join(f"{x['what']}: {x['old']} -> {x['new']}" for x in diffs) or "Nothing new to learn (memory unchanged)")
+    mem["diffs"].extend(diffs); mem["runs"] += 1
+    mem["history"].append({"ts": int(time.time()), "ctx": ctx, "topic": t, "result": res["type"], "value": res.get("value")})
+    save_mem(mem)
+    return {"scenario": sc["id"], "events": ev, "resolution": res, "narrative": narrate(ev), "rule_hit": rule_hit,
+            "memory": mem, "topic": t, "context": ctx, "scenario_def": sc}
 
-def human(topic, value):
+def human(topic, value, context=None):
     mem = load_mem(); t = sym(topic); value = sym(value)
-    mem["learned"][t] = {"type": "concede", "value": value, "cond": "human"}
-    mem["diffs"].append({"what": f"rule[{t}]", "old": None, "new": f"human decision -> {value}"})
+    ctx = sym(context) if context else next((c for c, v in mem["ctx"].items() if t in v["learned"]), t)
+    cm = mem["ctx"].setdefault(ctx, {"reliability": {}, "learned": {}}); old = cm["learned"].get(t)
+    cm["learned"][t] = {"type": "concede", "value": value, "cond": "human", "version": (old["version"] + 1) if old else 1, "ts": int(time.time())}
+    mem["diffs"].append({"what": f"rule[{ctx}/{t}]", "old": old and old["value"], "new": f"human decision -> {value}"})
+    mem["history"].append({"ts": int(time.time()), "ctx": ctx, "topic": t, "result": "human", "value": value})
     save_mem(mem); return mem
 
 def narrate(ev):
@@ -123,7 +126,6 @@ def narrate(ev):
             pass
     return "Final: " + ev[-1]["text"] + ". (Template narration; set LLM_KEY/LLM_BASE_URL/LLM_MODEL for LLM prose.)"
 
-
 import re
 def sym(x, n=40):
     """Sanitize to a safe MeTTa symbol (blocks atom injection from free text)."""
@@ -132,7 +134,7 @@ def sym(x, n=40):
 
 def validate(sc):
     """Normalize a scenario dict (preloaded or LLM/user supplied) into safe symbols."""
-    t = sym(sc["topic"]); out = {"id": sc.get("id") or "custom-" + t, "title": sc.get("title", t), "topic": t,
+    t = sym(sc["topic"]); out = {"id": sc.get("id") or "custom-" + t, "title": sc.get("title", t), "topic": t, "context": sym(sc.get("context") or t),
         "personas": sc.get("personas") or {"A": "Evidence Advocate", "B": "Skeptical Auditor"}, "claims": {}, "evidence": [], "reliability": {}}
     for ag in "AB": out["claims"][ag] = {"id": "c-" + ag.lower() + "-" + t, "value": sym(sc["claims"][ag]["value"])}
     ids = {sc["claims"][ag]["id"]: out["claims"][ag]["id"] for ag in "AB"}
@@ -147,7 +149,7 @@ def validate(sc):
     if c: out["condition"] = {"value": sym(c["value"]), "test": sym(c["test"])}
     return out
 
-SCHEMA = ('Return ONLY JSON: {"topic":str,"claims":{"A":{"id":"a","value":str},"B":{"id":"b","value":str}},'
+SCHEMA = ('Return ONLY JSON: {"topic":str,"context":short-domain-kebab (e.g. college,electronics),"claims":{"A":{"id":"a","value":str},"B":{"id":"b","value":str}},'
  '"evidence":[{"claim":"a"|"b","source":str,"obs":str,"age":days_int}],"reliability":{source:0..1},'
  '"condition":{"value":str,"test":str}|null}. Agent A is an evidence advocate holding one position; agent B a skeptical '
  'auditor holding the conflicting position. Use short kebab-case values. Do not decide who is right.')
@@ -176,6 +178,7 @@ def parse_lines(text):
         if ":" not in ln: continue
         k, v = [x.strip() for x in ln.split(":", 1)]; kl = k.lower()
         if kl == "topic": d["topic"] = v
+        elif kl == "context": d["context"] = v
         elif kl in ("a", "b"): d["claims"][k.upper()] = {"id": kl, "value": v}
         elif kl.endswith(" evidence"):
             p = [x.strip() for x in v.split(",")]

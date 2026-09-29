@@ -1,131 +1,39 @@
-# Two Agents, One Truth ⚖️🧠
+# Two Agents, One Truth
+Two agents disagree, weigh evidence with MeTTa rules, resolve (concede / conditional / escalate), then learn a rule and a reliability change. Run it again and they converge faster.
 
-**Deterministic, Auditable Multi-Agent Consensus Powered by MeTTa & Symbolic Reasoning.**
+## Problem
+Conflicting sources (official calendar vs field data) cause bad decisions and nobody can see why one was chosen.
 
-When two AI agents present conflicting data (e.g., official calendar vs. live field sensor data), how do we determine the truth without relying on an opaque LLM black box? 
+## Solution
+Each agent holds a claim and evidence. `core/weigh.metta` computes support = sum(reliability x recency), detects conflict, and picks the resolution. Nothing is hard-coded per scenario. Python only loads atoms and persists memory. An optional LLM only narrates the trace and never decides.
 
-**Two Agents, One Truth** bridges multi-agent disagreement by passing agent claims and evidence into a **Hyperon/MeTTa** symbolic reasoning engine. MeTTa weighs evidence (reliability × recency), evaluates conflicts through agent-specific lenses, determines auditable resolutions (concede, conditional truth, or escalate to human), and learns new rules to update agent memory for subsequent runs.
+## Technology
+Python, Hyperon/MeTTa, FastAPI, single-page UI. Each agent scores evidence through its own MeTTa lens (`pref` atoms): A weights source reliability, B weights recency. Optional LLM (narration and free-text intake): set `LLM_KEY`, `LLM_BASE_URL` (OpenAI-compatible, e.g. Groq/OpenRouter), `LLM_MODEL`.
 
----
-
-## 🎯 Key Principles
-
-- **No Black-Box Reasoning**: The LLM *never* decides the resolution outcome. Every decision, weight adjustment, and rule synthesis is performed explicitly inside `core/weigh.metta`.
-- **Auditable Trace**: Every step—evidence assertion, agent lens evaluation, conflict detection, score calculation, and resolution—produces a clear symbolic execution log.
-- **Continuous Learning & Memory**: When an agent concedes or a condition is established, the system updates source reliability scores and writes new symbolic rules. Subsequent runs converge immediately using learned rules.
-
----
-
-## 🏗 System Architecture
-
-```text
-       User Input / Preloaded Scenario
-                     │
-                     ▼
-           ┌──────────────────┐
-           │ Free-Text Intake │ (Optional LLM JSON Extraction)
-           └────────┬─────────┘
-                    │
-                    ▼
-           ┌──────────────────┐
-           │  Agent A / B     │ (Claims & Evidence Assertions)
-           └────────┬─────────┘
-                    │
-                    ▼
-          🧠 MeTTa Engine (weigh.metta)
-    ┌─────────────────────────────────┐
-    │ • Reliability × Recency Weights │
-    │ • Agent Lens Evaluation         │
-    │ • Conflict Detection            │
-    │ • Resolution (Concede/Cond/Esc) │
-    └────────────────┬────────────────┘
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │ Memory & Learning Diff  │
-        │  • Reliability Update   │
-        │  • Rule Synthesis       │
-        └─────────────────────────┘
+## Run
 ```
-
----
-
-## 🚀 Scenarios & Resolution Types
-
-| Scenario | Conflict | Resolution Type | Learning / Memory Behavior |
-| :--- | :--- | :--- | :--- |
-| **Crop (`crop`)** | Sowing timing (Advocate: Sow now, Auditor: Wait 7 days) | **Conditional Truth** | Learns rule: `sow = wait-7d` *if* `moisture-below-30pct`. |
-| **Campus (`campus`)** | Library closing time (Official page vs Student report) | **Concede** | Agent A concedes to Agent B; source reliability adjusted in memory (`reliability[official-page]` ↓, `student-report` ↑). |
-| **Tie (`tie`)** | Procurement vendor quote tie (Vendor X vs Vendor Y) | **Escalate** | Scores too close; escalates to human reviewer. Human input synthesizes a new learned rule. |
-
----
-
-## 🛠 Technology Stack
-
-- **Reasoning Core**: [Hyperon / MeTTa](https://github.com/trueagi-io/hyperon-experimental) (`hyperon`)
-- **Backend API**: Python 3.11+, FastAPI, Uvicorn
-- **Frontend**: Clean lightweight single-page HTML/JS interface
-- **Testing**: Pytest (7 unit tests covering engine, learning diffs, and scenarios)
-- **Omega Skill / Bridge**: `app/omega/` (Metta custom skill patch & Python bridge for SingularityNET Omega framework)
-
----
-
-## ⚙️ Quickstart
-
-### 1. Installation
-
-```bash
-git clone https://github.com/vishnuv41/Two-Agents-One-Truth.git
-cd Two-Agents-One-Truth/app
 pip install -r requirements.txt
+uvicorn app:app --reload      # open http://localhost:8000
+pytest                        # 16 tests
 ```
+Demo: run "campus", then run again: the learned rule applies with no re-argument. `Reset memory` re-records the demo.
 
-### 2. Running the Web Application
+## API
+`POST /conflict {"text": ...}` is the main endpoint (any domain). `/run/{crop|campus|tie}` are fixtures. Memory is scoped by `context` (domain) so learning in one domain doesn't leak into another; rules are versioned with timestamps.
 
-```bash
-uvicorn app:app --reload --port 8000
-```
-Open **`http://localhost:8000`** in your browser.
+## Tests
+16 pytest cases: strong A/B, close+condition, close+none, same claim, missing evidence, human decision, memory reuse, new domains, context isolation, five rounds, malformed input.
 
-### 3. Running Unit Tests
+## Free-text intake
+Paste a conflict in the UI. With an LLM configured it extracts claims/evidence JSON (validated, retried once, sanitized to safe MeTTa symbols). Without one, use the line format shown in the UI. The LLM never decides the outcome.
 
-```bash
-pytest
-```
-*(All 7 unit tests pass deterministically without external LLM dependencies).*
+## Omega integration
+`omega/plugins/twoagents/` is a real Omega plugin (Omega's `loadOmegaPlugin` + `add-skill` API, per its plugin docs) exposing a `(negotiate "...")` skill that calls the engine through a Python bridge. Install: `sh omega/install.sh /path/to/Omega`, `export TWOAGENTS_HOME=<this repo>`, start Omega. Verified: the bridge runs and the install script edits `config/plugins.yaml`. NOT yet verified: loading inside a running Omega (needs its full stack and an LLM); confirm with the mentors.
 
----
+## What's next
+Omega persistence/audit hook, more agents, real data sources.
 
-## 🤖 Optional LLM Configuration
-
-An OpenAI-compatible LLM (e.g. Groq, OpenRouter, OpenAI, Antigravity) is strictly **optional**.
-
-If environment variables (`LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) are set:
-1. **Free-Text Intake**: Translates unstructured user text into validated claims/evidence JSON. (Fallback: Structured line format parser).
-2. **Trace Narration**: Generates plain-language 3-sentence explanations of the completed MeTTa trace.
-
-> ⚠️ **Important**: The LLM has zero authority over decision-making or rule synthesis.
-
----
-
-## 🌌 Omega Framework Integration
-
-The repository includes a dedicated bridge in `app/omega/`:
-- `skills_patch.metta`: Custom MeTTa skill definition following the Omega extension pattern.
-- `twoagents_bridge.py`: Python wrapper exposing the MeTTa engine to Omega agents.
-
-*Status: Omega skill/bridge implemented; runtime integration verified during the hackathon after mentor confirmation.*
-
----
-
-## 📜 AI & Tooling Disclosure
-
-- **Coding & Scaffolding**: Antigravity AI (Google DeepMind) was used for project organization, refactoring, test suite setup, and README documentation, reviewed and verified by the team.
-- **Runtime Execution**: Deterministic symbolic reasoning is executed entirely by **Hyperon/MeTTa** (`weigh.metta`).
-- **Optional Runtime LLM**: Used solely for free-text parsing into JSON and trace narration.
-
----
-
-## 📄 License
-
-MIT License.
+## AI Disclosure
+- Claude (Anthropic) was used for project planning, and for generating the initial code scaffold, MeTTa rules, tests and this README, which the team reviewed and edited.
+- At runtime, an optional OpenAI-compatible LLM is used only for (1) turning free text into structured claims JSON and (2) narrating the finished trace. It does not weigh evidence or choose resolutions; that is done by MeTTa rules in `core/weigh.metta`.
+- Team: add any other tools you used (Omega inference, Copilot, etc.) before submitting.

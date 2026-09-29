@@ -14,18 +14,21 @@ Python, Hyperon/MeTTa, FastAPI, single-page UI. Each agent scores evidence throu
 ```
 pip install -r requirements.txt
 uvicorn app:app --reload      # open http://localhost:8000
-pytest                        # 7 tests
+pytest                        # 16 tests
 ```
 Demo: run "campus", then run again: the learned rule applies with no re-argument. `Reset memory` re-records the demo.
 
-## Scenarios
-crop (conditional), campus (concede + reliability learning), tie (escalate to human, human answer becomes a rule).
+## API
+`POST /conflict {"text": ...}` is the main endpoint (any domain). `/run/{crop|campus|tie}` are fixtures. Memory is scoped by `context` (domain) so learning in one domain doesn't leak into another; rules are versioned with timestamps.
+
+## Tests
+16 pytest cases: strong A/B, close+condition, close+none, same claim, missing evidence, human decision, memory reuse, new domains, context isolation, five rounds, malformed input.
 
 ## Free-text intake
 Paste a conflict in the UI. With an LLM configured it extracts claims/evidence JSON (validated, retried once, sanitized to safe MeTTa symbols). Without one, use the line format shown in the UI. The LLM never decides the outcome.
 
 ## Omega integration
-`omega/` holds an Omega skill: `skills_patch.metta` (getSkills line + `(negotiate ...)` definition, following Omega's custom-skill tutorial) and `twoagents_bridge.py`. Not yet tested against a running Omega instance; confirm py-call paths with mentors.
+`omega/plugins/twoagents/` is a real Omega plugin (Omega's `loadOmegaPlugin` + `add-skill` API, per its plugin docs) exposing a `(negotiate "...")` skill that calls the engine through a Python bridge. Install: `sh omega/install.sh /path/to/Omega`, `export TWOAGENTS_HOME=<this repo>`, start Omega. Verified: the bridge runs and the install script edits `config/plugins.yaml`. NOT yet verified: loading inside a running Omega (needs its full stack and an LLM); confirm with the mentors.
 
 ## What's next
 Omega persistence/audit hook, more agents, real data sources.
