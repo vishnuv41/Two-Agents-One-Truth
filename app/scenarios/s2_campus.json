@@ -1,0 +1,5 @@
+{"id":"campus","title":"Campus fact: stale official page vs recent student report","topic":"library-hours","personas":{"A":"Evidence Advocate","B":"Skeptical Auditor"},
+"claims":{"A":{"id":"c3","value":"closes-8pm"},"B":{"id":"c4","value":"closes-10pm"}},
+"reliability":{"official-page":0.9,"student-report":0.7},
+"evidence":[{"claim":"c3","source":"official-page","obs":"page-says-8pm","age":200},
+{"claim":"c4","source":"student-report","obs":"seen-open-at-9pm","age":2},{"claim":"c4","source":"student-report","obs":"notice-on-door","age":4}]}

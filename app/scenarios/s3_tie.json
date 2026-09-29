@@ -1,0 +1,4 @@
+{"id":"tie","title":"Low-confidence tie: escalate to human","topic":"vendor","personas":{"A":"Evidence Advocate","B":"Skeptical Auditor"},
+"claims":{"A":{"id":"c5","value":"vendor-x"},"B":{"id":"c6","value":"vendor-y"}},
+"reliability":{"quote-x":0.8,"quote-y":0.8},
+"evidence":[{"claim":"c5","source":"quote-x","obs":"cheaper","age":10},{"claim":"c6","source":"quote-y","obs":"faster","age":12}]}

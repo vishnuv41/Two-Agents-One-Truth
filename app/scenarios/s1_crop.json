@@ -1,0 +1,6 @@
+{"id":"crop","title":"Crop timing: govt calendar vs local soil","topic":"sow","personas":{"A":"Evidence Advocate","B":"Skeptical Auditor"},
+"claims":{"A":{"id":"c1","value":"now"},"B":{"id":"c2","value":"wait-7d"}},
+"reliability":{"govt-calendar":0.8,"soil-sensor":0.7},
+"evidence":[{"claim":"c1","source":"govt-calendar","obs":"seasonal-window-open","age":25},
+{"claim":"c2","source":"soil-sensor","obs":"moisture-24pct","age":1}],
+"condition":{"value":"wait-7d","test":"moisture-below-30pct"}}

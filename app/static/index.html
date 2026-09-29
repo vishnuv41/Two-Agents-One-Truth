@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Two Agents, One Truth</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--card:#f4f4f6;--a:#5b3fd6;--b:#d9531e}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--card:#1d1d22}}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:1000px;margin:0 auto;padding:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}button,select{padding:8px 12px;border-radius:6px;border:1px solid #888;background:var(--card);color:var(--fg)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border-radius:8px;padding:12px;margin-bottom:12px}.A{border-left:4px solid var(--a)}.B{border-left:4px solid var(--b)}
+.ev{font-family:monospace;font-size:13px;margin:4px 0}.res{background:#1f8a4c;color:#fff;padding:12px;border-radius:8px;font-weight:600}
+</style></head><body>
+<h2>Two Agents, One Truth</h2>
+<div class="row"><select id="sc"></select><button onclick="go()">Run</button><button onclick="go()">Run again (uses learned rules)</button><button onclick="rst()">Reset memory</button></div>
+<details class="card"><summary>Or paste your own conflict (free text or line format)</summary>
+<textarea id="tx" rows="6" style="width:100%" placeholder="topic: sow&#10;A: now&#10;B: wait-7d&#10;A evidence: govt-calendar, window-open, 25, 0.8&#10;B evidence: soil-sensor, moisture-24pct, 1, 0.7&#10;condition: wait-7d, moisture-below-30pct"></textarea>
+<button onclick="go(true)">Run from text</button> <span id="err" style="color:#c00"></span></details>
+<div class="grid"><div><h3>Debate</h3><div id="deb"></div><div id="res"></div><p id="nar"></p><div id="hum"></div></div>
+<div><h3>Reasoning trace (MeTTa)</h3><div class="card" id="tr"></div><h3>Memory &amp; rule diff</h3><div class="card" id="mem"></div></div></div>
+<script>
+const $=i=>document.getElementById(i),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+fetch('/scenarios').then(r=>r.json()).then(l=>{$('sc').innerHTML=l.map(s=>`<option value="${s.id}">${s.title}</option>`).join('')});
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+async function go(txt){const id=$('sc').value;$('err').textContent='';['deb','res','nar','tr','hum'].forEach(k=>$(k).innerHTML='');
+ const resp=txt===true?await fetch('/run_text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tx').value})}):await fetch('/run/'+id,{method:'POST'});
+ const d=await resp.json();if(d.error){$('err').textContent=d.error;return}
+ for(const e of d.events){$('tr').innerHTML+=`<div class="ev">[${e.kind}] ${esc(e.text)}</div>`;
+  if(e.agent)$('deb').innerHTML+=`<div class="card ${e.agent}"><b>Agent ${e.agent}</b><br>${esc(e.text)}</div>`;
+  await sleep(500)}
+ $('res').innerHTML=`<div class="res">${esc(d.resolution.text)}</div>`;$('nar').textContent=d.narrative;
+ if(d.resolution.type==='escalate')$('hum').innerHTML=`Human decision: <input id="hv" placeholder="e.g. vendor-x"> <button onclick="hd('${d.topic}')">Submit</button>`;
+ showMem(d.memory)}
+async function hd(id){const v=$('hv').value.trim();if(v)showMem(await (await fetch(`/human/${id}/${encodeURIComponent(v)}`,{method:'POST'})).json())}
+function showMem(m){$('mem').innerHTML='<b>Reliability</b><br>'+Object.entries(m.reliability).map(([k,v])=>`<div class="ev">${k}: ${v}</div>`).join('')+'<b>Rule diff</b><br>'+(m.diffs.map(x=>`<div class="ev">${esc(x.what)}: ${esc(x.old)} → ${esc(x.new)}</div>`).join('')||'none yet')}
+async function rst(){await fetch('/reset',{method:'POST'});['deb','res','nar','tr','hum','mem'].forEach(k=>$(k).innerHTML='')}
+fetch('/memory').then(r=>r.json()).then(showMem)
+</script></body></html>
