@@ -5,7 +5,8 @@
 @media(prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--card:#1d1d22}}
 body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:1000px;margin:0 auto;padding:16px}
 button,select,textarea,input{padding:8px 12px;border-radius:6px;border:1px solid #888;background:var(--card);color:var(--fg);font:inherit}
-button.p{background:#5b3fd6;color:#fff;border:0}.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+button.p{background:#5b3fd6;color:#fff;border:0}button:disabled{opacity:0.6;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border-radius:8px;padding:12px;margin-bottom:10px}.A{border-left:4px solid var(--a)}.B{border-left:4px solid var(--b)}
 .ev{font-family:monospace;font-size:13px;margin:4px 0}.rd{font-weight:700;margin-top:8px}.res{background:#1f8a4c;color:#fff;padding:12px;border-radius:8px;font-weight:600}
@@ -14,7 +15,7 @@ button.p{background:#5b3fd6;color:#fff;border:0}.row{display:flex;gap:8px;flex-w
 <h2>Two Agents, One Truth</h2>
 <p>Describe a conflict: two sources or agents that disagree about the same fact. Agent A trusts reliable sources; Agent B trusts recent evidence. MeTTa rules negotiate; the LLM only extracts and narrates.</p>
 <textarea id="tx" rows="5" style="width:100%" placeholder="e.g. The manufacturer says the component works up to 85C, but our recent tests show failures above 75C. Should we use it?"></textarea>
-<div class="row"><button class="p" onclick="go()">Resolve</button>
+<div class="row"><button id="btn-go" class="p" onclick="go()">Resolve</button>
 <select id="ex" onchange="if(this.value)$('tx').value=this.value"><option value="">Load an example (line format works without an LLM)</option></select>
 <button onclick="rst()">Reset memory</button><span id="err" style="color:#c00"></span></div>
 <div class="grid"><div><h3>Current Debate</h3><div id="deb"></div><div id="res"></div><p id="nar"></p><div id="hum"></div>
@@ -26,20 +27,25 @@ const EX={"Electronics (85C vs 75C)":"topic: max-temp\ncontext: electronics\nA: 
 "College deadline":"topic: registration-close\ncontext: college\nA: friday\nB: thursday\nA evidence: official-site, website-banner, 120, 0.9\nB evidence: dept-notice, email-notice, 3, 0.6\nB evidence: dept-notice, poster, 2, 0.6",
 "Crop timing":"topic: sow\ncontext: agriculture\nA: now\nB: wait-7d\nA evidence: govt-calendar, window-open, 25, 0.8\nB evidence: soil-sensor, moisture-24pct, 1, 0.7\ncondition: wait-7d, moisture-below-30pct"};
 $('ex').innerHTML+=Object.keys(EX).map(k=>`<option value="${esc(EX[k])}">${k}</option>`).join('');
-async function go(){$('err').textContent='';['deb','res','nar','tr','hum','ctx-active'].forEach(k=>$(k).innerHTML='');
- const r=await fetch('/conflict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tx').value})});const d=await r.json();
- if(d.error){$('err').textContent=d.error;return}
- if(d.context)$('ctx-active').innerHTML=`<span class="tag">Active Context: ${esc(d.context)}</span>`;
- let last=0;for(const e of d.events.slice().sort((a,b)=>a.round-b.round)){
-  if(e.round!==last){last=e.round;$('deb').innerHTML+=`<div class="rd">Round ${e.round}: ${['','ASSERT','CHALLENGE','WEIGH','RESOLVE','LEARN'][e.round]}</div>`}
-  $('tr').innerHTML+=`<div class="ev">[R${e.round} ${e.kind}] ${esc(e.text)}</div>`;
-  $('deb').innerHTML+=`<div class="card ${e.agent||''}">${e.agent?'<b>Agent '+e.agent+'</b><br>':''}${esc(e.text)}</div>`;await sleep(350)}
- $('res').innerHTML=`<div class="res">${esc(d.resolution.text)}</div>`;$('nar').textContent=d.narrative;
- if(d.resolution.type==='escalate'){
-   const ca = d.scenario_def.claims.A.value, cb = d.scenario_def.claims.B.value;
-   $('hum').innerHTML = `<div class="card" style="border:2px solid var(--b)"><b>⚠️ Human Review Required</b><br><small>Scores fall within uncertainty margin (< 25% gap). Select resolution:</small><div class="row" style="margin-top:6px"><button onclick="hd('${d.topic}','${ca}','${d.context}')">Claim A: ${esc(ca)}</button><button onclick="hd('${d.topic}','${cb}','${d.context}')">Claim B: ${esc(cb)}</button></div><div class="row" style="margin-top:4px"><input id="hv" placeholder="Or enter custom resolution value"> <button class="p" onclick="const v=$('hv').value.trim();if(v)hd('${d.topic}',v,'${d.context}')">Submit Decision</button></div></div>`;
- }
- showMem(d.memory, d.context)}
+async function go(){
+ const btn=$('btn-go');btn.disabled=true;btn.textContent='Resolving...';
+ $('err').textContent='';['deb','res','nar','tr','hum','ctx-active'].forEach(k=>$(k).innerHTML='');
+ try{
+  const r=await fetch('/conflict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('tx').value})});const d=await r.json();
+  if(d.error){$('err').textContent=d.error;return}
+  if(d.context)$('ctx-active').innerHTML=`<span class="tag">Active Context: ${esc(d.context)}</span>`;
+  let last=0;for(const e of d.events.slice().sort((a,b)=>a.round-b.round)){
+   if(e.round!==last){last=e.round;$('deb').innerHTML+=`<div class="rd">Round ${e.round}: ${['','ASSERT','CHALLENGE','WEIGH','RESOLVE','LEARN'][e.round]}</div>`}
+   $('tr').innerHTML+=`<div class="ev">[R${e.round} ${e.kind}] ${esc(e.text)}</div>`;
+   $('deb').innerHTML+=`<div class="card ${e.agent||''}">${e.agent?'<b>Agent '+e.agent+'</b><br>':''}${esc(e.text)}</div>`;await sleep(250)}
+  $('res').innerHTML=`<div class="res">${esc(d.resolution.text)}</div>`;$('nar').textContent=d.narrative;
+  if(d.resolution.type==='escalate'){
+    const ca = d.scenario_def.claims.A.value, cb = d.scenario_def.claims.B.value;
+    $('hum').innerHTML = `<div class="card" style="border:2px solid var(--b)"><b>⚠️ Human Review Required</b><br><small>Scores fall within uncertainty margin (< 25% gap). Select resolution:</small><div class="row" style="margin-top:6px"><button onclick="hd('${d.topic}','${ca}','${d.context}')">Claim A: ${esc(ca)}</button><button onclick="hd('${d.topic}','${cb}','${d.context}')">Claim B: ${esc(cb)}</button></div><div class="row" style="margin-top:4px"><input id="hv" placeholder="Or enter custom resolution value"> <button class="p" onclick="const v=$('hv').value.trim();if(v)hd('${d.topic}',v,'${d.context}')">Submit Decision</button></div></div>`;
+  }
+  showMem(d.memory, d.context);
+ }finally{btn.disabled=false;btn.textContent='Resolve';}
+}
 async function hd(t,v,c){if(v)showMem(await (await fetch(`/human/${encodeURIComponent(t)}/${encodeURIComponent(v)}?context=${encodeURIComponent(c)}`,{method:'POST'})).json(), c)}
 function showMem(m, activeCtx){
  let html = Object.entries(m.ctx||{}).map(([c,v])=>`<div style="${c===activeCtx?'font-weight:700;color:var(--a)':''}"><b>Domain: ${esc(c)}</b></div>`+Object.entries(v.reliability).map(([k,x])=>`<div class="ev">${esc(k)}: ${x}</div>`).join('')+Object.entries(v.learned).map(([k,x])=>`<div class="ev">rule ${esc(k)} v${x.version}: ${esc(x.type)} ${esc(x.value)}</div>`).join('')).join('');

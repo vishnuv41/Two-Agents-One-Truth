@@ -153,7 +153,12 @@ def validate(sc):
         out["reliability"][src] = max(0.05, min(0.98, float(r)))
     if not out["evidence"]: raise ValueError("no evidence")
     c = sc.get("condition")
-    if c: out["condition"] = {"value": sym(c["value"]), "test": sym(c["test"])}
+    if c:
+        val = sym(c["value"])
+        valid_vals = {out["claims"]["A"]["value"], out["claims"]["B"]["value"]}
+        if val not in valid_vals:
+            val = out["claims"]["B"]["value"]
+        out["condition"] = {"value": val, "test": sym(c["test"])}
     return out
 
 SCHEMA = ('Return ONLY JSON: {"topic":str,"context":short-domain-kebab (e.g. college,electronics),"claims":{"A":{"id":"a","value":str},"B":{"id":"b","value":str}},'
@@ -199,4 +204,6 @@ def parse_lines(text):
 
 def intake(text):
     """Free text -> validated scenario. LLM first, line-format fallback. The LLM never decides."""
+    if not text or len(text.strip()) < 10 or ":" not in text and " " not in text.strip():
+        return parse_lines(text)
     return _llm_json(text) or parse_lines(text)
