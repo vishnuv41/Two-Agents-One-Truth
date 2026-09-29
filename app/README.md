@@ -14,7 +14,7 @@ Python, Hyperon/MeTTa, FastAPI, single-page UI. Each agent scores evidence throu
 ```
 pip install -r requirements.txt
 uvicorn app:app --reload      # open http://localhost:8000
-pytest                        # 4 tests
+pytest                        # 7 tests
 ```
 Demo: run "campus", then run again: the learned rule applies with no re-argument. `Reset memory` re-records the demo.
 

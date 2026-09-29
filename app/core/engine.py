@@ -50,8 +50,10 @@ def run_scenario(sc):
     for ag in "AB":
         for e in sc["evidence"]:
             if e["claim"] == cl[ag]["id"]:
-                emit("challenge", f"{ag} evidence: {e['source']} '{e['obs']}' age {e['age']}d "
-                     f"-> reliability {mem['reliability'][e['source']]}, recency {num(q(m, f'(rec {e['age']})')):.1f}", agent=ag)
+                age = e["age"]
+                src = e["source"]
+                emit("challenge", f"{ag} evidence: {src} '{e['obs']}' age {age}d "
+                     f"-> reliability {mem['reliability'][src]}, recency {num(q(m, f'(rec {age})')):.1f}", agent=ag)
     for ag in "AB":
         la = num(q(m, f"(lens {ag} {cl['A']['id']})")); lb = num(q(m, f"(lens {ag} {cl['B']['id']})"))
         emit("lens", f"Lens {ag} ({sc['personas'][ag]}): claim A={la:.2f}, claim B={lb:.2f} -> prefers {'A' if la > lb else 'B' if lb > la else 'neither'}", agent=ag)

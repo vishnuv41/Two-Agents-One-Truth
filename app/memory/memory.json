@@ -1,0 +1,21 @@
+{
+  "reliability": {
+    "quote-x": 0.8,
+    "quote-y": 0.8
+  },
+  "learned": {
+    "vendor": {
+      "type": "concede",
+      "value": "vendor-x",
+      "cond": "human"
+    }
+  },
+  "diffs": [
+    {
+      "what": "rule[vendor]",
+      "old": null,
+      "new": "human decision -> vendor-x"
+    }
+  ],
+  "runs": 2
+}
