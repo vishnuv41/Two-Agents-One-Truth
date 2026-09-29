@@ -49,6 +49,11 @@ class OmegaRuntime:
             args = [str(arg).strip('"') for arg in children[1:]]
 
             mod_name, func_name = func_sym.split(".")
+            # Security sandbox check: only allow bridge/twoagents modules
+            allowed_modules = {"twoagents_bridge", "core.engine"}
+            if mod_name not in allowed_modules and not mod_name.endswith("_bridge"):
+                return [ValueAtom(f"error: module '{mod_name}' not permitted in py-call")]
+
             # Ensure plugin directory is in sys.path for bridge modules
             plugin_subdirs = [os.path.join(self.plugins_dir, d) for d in os.listdir(self.plugins_dir) if os.path.isdir(os.path.join(self.plugins_dir, d))]
             for pdir in plugin_subdirs:
