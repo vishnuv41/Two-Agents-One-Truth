@@ -6,7 +6,7 @@
 (pref A 0.7 0.3)
 (pref B 0.3 0.7)
 (= (sum-list $l) (foldl-atom $l 0 $a $x (+ $a $x)))
-(= (ev-scores $ag $c) (collapse (match &self (, (evidence $c $s $o $age) (pref $ag $wr $wc)) (+ (* $wr (rel $s)) (* $wc (rec $age))))))
+(= (ev-scores $ag $c) (collapse (match &self (, (evidence $c $s $o $age $d) (pref $ag $wr $wc)) (* $d (+ (* $wr (rel $s)) (* $wc (rec $age)))))))
 (= (lens $ag $c) (sum-list (ev-scores $ag $c)))
 (= (support $c) (/ (+ (lens A $c) (lens B $c)) 2))
 (= (abs $x) (if (< $x 0) (- 0 $x) $x))

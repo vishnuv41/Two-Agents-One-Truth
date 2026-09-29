@@ -48,7 +48,7 @@ def run_scenario(sc):
     m = MeTTa(); m.run(open(os.path.join(ROOT, "core", "weigh.metta")).read())
     for s, r in cm["reliability"].items(): m.run(f"(reliability {s} {r})")
     for ag, c in cl.items(): m.run(f"(claim {ag} {t} {c['value']} {c['id']})")
-    for x in sc["evidence"]: m.run(f"(evidence {x['claim']} {x['source']} {x['obs']} {x['age']})")
+    for x in sc["evidence"]: m.run(f"(evidence {x['claim']} {x['source']} {x['obs']} {x['age']} {x['directness']})")
     if sc.get("condition"): m.run(f"(condition {t} {sc['condition']['value']} {sc['condition']['test']})")
     rule_hit = t in cm["learned"]
     if rule_hit:
@@ -147,8 +147,10 @@ def validate(sc):
     ids = {sc["claims"][ag]["id"]: out["claims"][ag]["id"] for ag in "AB"}
     for e in sc["evidence"]:
         if e["claim"] not in ids: raise ValueError("evidence refers to unknown claim")
-        src = sym(e["source"]); out["evidence"].append({"claim": ids[e["claim"]], "source": src, "obs": sym(e.get("obs", "obs")),
-            "age": max(0, min(3650, int(float(e.get("age", 0)))))})
+        src = sym(e["source"])
+        directness = round(max(0.1, min(1.0, float(e.get("directness", 1.0)))), 2)
+        out["evidence"].append({"claim": ids[e["claim"]], "source": src, "obs": sym(e.get("obs", "obs")),
+            "age": max(0, min(3650, int(float(e.get("age", 0))))), "directness": directness})
         r = sc.get("reliability", {}).get(e["source"], 0.6)
         out["reliability"][src] = max(0.05, min(0.98, float(r)))
     if not out["evidence"]: raise ValueError("no evidence")
