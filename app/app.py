@@ -1,12 +1,26 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from core import engine, agents, memory
+from core import engine, agents, memory, omega
 
 app = FastAPI(title="Two Agents, One Truth")
 
 @app.get("/")
 def index(): return FileResponse("static/index.html")
+
+@app.get("/omega/skills")
+def omega_skills():
+    return omega.runtime.list_skills()
+
+@app.post("/omega/invoke")
+def omega_invoke(body: dict):
+    skill = body.get("skill", "negotiate")
+    arg = body.get("argument", "")
+    try:
+        res = omega.runtime.invoke_skill(skill, arg)
+        return {"skill": skill, "argument": arg, "result": res}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 @app.get("/agents")
 def get_agents(): return agents.list_agents()
