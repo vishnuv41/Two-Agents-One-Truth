@@ -10,3 +10,6 @@ ENV/
 htmlcov/
 *.log
 .DS_Store
+memory.json
+app/memory/memory.json
+
