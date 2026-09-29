@@ -65,3 +65,29 @@ def test_agent_system():
     assert agents.get_agent("A")["name"] == "Evidence Advocate"
     assert agents.get_agent("B")["name"] == "Skeptical Auditor"
 
+def test_resolution_agree():
+    res = engine.run_scenario(T("st1", "friday", "friday", [E("web", 1)], [E("notice", 1)]))["resolution"]
+    assert res["type"] == "agree" and res["reason"] == "identical_claims" and res["accepted_claim"] == "friday"
+
+def test_resolution_concede():
+    res = engine.run_scenario(T("st2", "x", "y", [E("m1", 1), E("m2", 2)], [E("w", 400)]))["resolution"]
+    assert res["type"] == "concede" and res["reason"] == "support_margin_exceeded" and res["accepted_agent"] == "A"
+
+def test_resolution_conditional():
+    res = engine.run_scenario(T("st3", "85c", "75c", [E("spec", 20)], [E("test", 20)], cond=("75c", "failures-above-75c")))["resolution"]
+    assert res["type"] == "conditional" and res["reason"] == "condition_applied" and res["accepted_claim"] == "75c"
+
+def test_resolution_escalate():
+    res = engine.run_scenario(T("st4", "x", "y", [E("s1", 20)], [E("s2", 20)]))["resolution"]
+    assert res["type"] == "escalate" and res["reason"] == "support_margin_close" and res["accepted_agent"] is None
+
+def test_resolution_insufficient_evidence():
+    res = engine.run_scenario(T("st5", "x", "y", [E("s1", 3)], []))["resolution"]
+    assert res["type"] == "escalate" and res["reason"] == "insufficient_evidence"
+
+def test_resolution_output_schema():
+    res = engine.run_scenario(T("st6", "a", "b", [E("s1", 1)], [E("s2", 2)]))["resolution"]
+    for key in ("type", "reason", "text"):
+        assert key in res
+
+

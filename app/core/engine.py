@@ -82,23 +82,56 @@ def run_scenario(sc):
         old = cm["learned"].get(t); ver = (old["version"] + 1) if old else 1
         cm["learned"][t] = {"type": ty, "value": val, "cond": cond, "version": ver, "ts": int(time.time())}
         diffs.append({"what": f"rule[{ctx}/{t}] v{ver}", "old": (old or {}).get("type") and f"{old['type']} {old['value']}", "new": f"{ty} {val} ({cond})"})
-    if kind == "agree": res["text"] = f"Agents already agree: {t} = {cl['A']['value']}"
+    if kind == "agree":
+        res.update(
+            reason="identical_claims",
+            accepted_agent=None,
+            accepted_claim=cl["A"]["value"],
+            value=cl["A"]["value"],
+            text=f"Agents already agree: {t} = {cl['A']['value']}"
+        )
     elif kind == "concede":
         loser = d[1]; win = "B" if loser == "A" else "A"; val = cl[win]["value"]
-        res.update(value=val, text=f"Agent {loser} concedes to Agent {win}: {t} = {val}")
+        res.update(
+            reason="support_margin_exceeded",
+            accepted_agent=win,
+            accepted_claim=val,
+            value=val,
+            text=f"Agent {loser} concedes to Agent {win}: {t} = {val}"
+        )
         for x in sc["evidence"]:
             dl = 0.05 if x["claim"] == cl[win]["id"] else -0.05; old = cm["reliability"][x["source"]]
             new = round(num(q(m, f"(adjust {old} {dl})")), 3)
             if new != old: cm["reliability"][x["source"]] = new; diffs.append({"what": f"reliability[{ctx}/{x['source']}]", "old": old, "new": new})
         learn_rule("concede", val, "none")
     elif kind == "conditional":
-        res.update(value=d[1], cond=d[2], text=f"Conditional truth: {t} = {d[1]} if {d[2]}; otherwise follow the other agent's claim")
+        res.update(
+            reason="condition_applied",
+            accepted_agent=None,
+            accepted_claim=d[1],
+            value=d[1],
+            cond=d[2],
+            text=f"Conditional truth: {t} = {d[1]} if {d[2]}; otherwise follow the other agent's claim"
+        )
         if not rule_hit: learn_rule("conditional", d[1], d[2])
     elif kind == "applied":
-        res.update(type="concede", value=d[1], text=f"Both agents apply the learned rule: {t} = {d[1]}")
+        res.update(
+            type="concede",
+            reason="applied_learned_rule",
+            accepted_agent=None,
+            accepted_claim=d[1],
+            value=d[1],
+            text=f"Both agents apply the learned rule: {t} = {d[1]}"
+        )
     else:
-        res["type"] = "escalate"
-        res["text"] = ("One side has no evidence" if kind == "escalate-missing" else "Scores too close and no usable condition") + ": ESCALATED to a human reviewer"
+        reason_code = "insufficient_evidence" if kind == "escalate-missing" else "support_margin_close"
+        res.update(
+            type="escalate",
+            reason=reason_code,
+            accepted_agent=None,
+            accepted_claim=None,
+            text=("One side has no evidence" if kind == "escalate-missing" else "Scores too close and no usable condition") + ": ESCALATED to a human reviewer"
+        )
     emit("resolve", res["text"], resolution=res)
     emit("learn", "; ".join(f"{x['what']}: {x['old']} -> {x['new']}" for x in diffs) or "Nothing new to learn (memory unchanged)")
     mem["diffs"].extend(diffs); mem["runs"] += 1
