@@ -90,4 +90,49 @@ def test_resolution_output_schema():
     for key in ("type", "reason", "text"):
         assert key in res
 
+def test_memory_save_and_retrieve():
+    from core import memory
+    mem = memory.load_mem()
+    assert "ctx" in mem and "runs" in mem
+
+def test_memory_context_lookup():
+    from core import memory
+    engine.run_scenario(T("mct1", "a", "b", [E("s1", 1)], [E("s2", 200)], ctx="space"))
+    ctx_mem = memory.get_context_memory("space")
+    assert "s1" in ctx_mem["reliability"]
+
+def test_memory_topic_lookup():
+    from core import memory
+    engine.run_scenario(T("mtp1", "a", "b", [E("m1", 1), E("m2", 2)], [E("w", 400)], ctx="space"))
+    topic_mem = memory.get_topic_memory("space", "mtp1")
+    assert topic_mem is not None and topic_mem["value"] == "a"
+
+def test_memory_search():
+    from core import memory
+    engine.run_scenario(T("msh1", "a", "b", [E("m1", 1), E("m2", 2)], [E("w", 400)], ctx="weather"))
+    results = memory.search_memory("weather")
+    assert len(results) > 0
+
+def test_runs_history_and_get():
+    from core import memory
+    r = engine.run_scenario(T("mrh1", "a", "b", [E("s1", 1)], [E("s2", 2)]))
+    run_id = r["run_id"]
+    runs = memory.get_runs()
+    assert any(x["run_id"] == run_id for x in runs)
+    run_detail = memory.get_run(run_id)
+    assert run_detail is not None and run_detail["topic"] == "mrh1"
+
+def test_memory_reliability_history():
+    from core import memory
+    engine.run_scenario(T("mrh2", "a", "b", [E("m1", 1), E("m2", 2)], [E("w", 400)], ctx="finance"))
+    ctx_mem = memory.get_context_memory("finance")
+    assert "m1" in ctx_mem.get("reliability_history", {})
+
+def test_memory_versioning():
+    from core import memory
+    engine.run_scenario(T("mver1", "a", "b", [E("m1", 1), E("m2", 2)], [E("w", 400)], ctx="health"))
+    t1 = memory.get_topic_memory("health", "mver1")
+    assert t1["version"] == 1
+
+
 

@@ -17,17 +17,16 @@ def scenarios():
             s = json.load(open(os.path.join(SC, f))); out[s["id"]] = s
     return out
 
+from core import memory
+
 def load_mem():
-    if os.path.exists(MEM):
-        m = json.load(open(MEM))
-        if "ctx" in m: return m
-    return {"ctx": {}, "history": [], "diffs": [], "runs": 0}
+    return memory.load_mem()
 
 def save_mem(m):
-    os.makedirs(os.path.dirname(MEM), exist_ok=True); json.dump(m, open(MEM, "w"), indent=2)
+    memory.save_mem(m)
 
 def reset():
-    if os.path.exists(MEM): os.remove(MEM)
+    memory.reset()
 
 def q(m, expr):
     r = m.run("!" + expr)
@@ -42,9 +41,10 @@ def run(sid): return run_scenario(scenarios()[sid])
 def run_scenario(sc):
     """5 rounds: assert, challenge, weigh, resolve, learn. Every decision is a MeTTa query."""
     sc = validate(sc); t = sc["topic"]; ctx = sc["context"]; cl = sc["claims"]
-    mem = load_mem(); cm = mem["ctx"].setdefault(ctx, {"reliability": {}, "learned": {}}); ev = []; diffs = []
+    mem = load_mem(); cm = mem["ctx"].setdefault(ctx, {"reliability": {}, "reliability_history": {}, "learned": {}}); ev = []; diffs = []
     def emit(kind, text, **kw): ev.append({"kind": kind, "round": ROUND[kind], "text": text, **kw})
     for s, r in sc["reliability"].items(): cm["reliability"].setdefault(s, r)
+    save_mem(mem)
     m = MeTTa(); m.run(open(os.path.join(ROOT, "core", "weigh.metta")).read())
     for s, r in cm["reliability"].items(): m.run(f"(reliability {s} {r})")
     for ag, c in cl.items(): m.run(f"(claim {ag} {t} {c['value']} {c['id']})")
@@ -78,10 +78,11 @@ def run_scenario(sc):
     kind = d[0]; res = {"type": kind}
     emit("conflict", "No conflict: both agents agree" if kind == "agree" else "CONFLICT DETECTED")
     if rule_hit and kind in ("conditional", "applied"): emit("rule", "Learned rule from an earlier run applied: converged without re-arguing")
+    run_id = memory.generate_run_id()
     def learn_rule(ty, val, cond):
-        old = cm["learned"].get(t); ver = (old["version"] + 1) if old else 1
-        cm["learned"][t] = {"type": ty, "value": val, "cond": cond, "version": ver, "ts": int(time.time())}
-        diffs.append({"what": f"rule[{ctx}/{t}] v{ver}", "old": (old or {}).get("type") and f"{old['type']} {old['value']}", "new": f"{ty} {val} ({cond})"})
+        rule_rec = memory.record_learned_rule(ctx, t, ty, val, cond, run_id)
+        ver = rule_rec["version"]
+        diffs.append({"what": f"rule[{ctx}/{t}] v{ver}", "old": (cm["learned"].get(t) or {}).get("type") and f"{cm['learned'][t]['type']} {cm['learned'][t]['value']}", "new": f"{ty} {val} ({cond})"})
     if kind == "agree":
         res.update(
             reason="identical_claims",
@@ -102,7 +103,9 @@ def run_scenario(sc):
         for x in sc["evidence"]:
             dl = 0.05 if x["claim"] == cl[win]["id"] else -0.05; old = cm["reliability"][x["source"]]
             new = round(num(q(m, f"(adjust {old} {dl})")), 3)
-            if new != old: cm["reliability"][x["source"]] = new; diffs.append({"what": f"reliability[{ctx}/{x['source']}]", "old": old, "new": new})
+            if new != old:
+                memory.update_source_reliability(ctx, x["source"], old, new, run_id)
+                diffs.append({"what": f"reliability[{ctx}/{x['source']}]", "old": old, "new": new})
         learn_rule("concede", val, "none")
     elif kind == "conditional":
         res.update(
@@ -134,20 +137,17 @@ def run_scenario(sc):
         )
     emit("resolve", res["text"], resolution=res)
     emit("learn", "; ".join(f"{x['what']}: {x['old']} -> {x['new']}" for x in diffs) or "Nothing new to learn (memory unchanged)")
-    mem["diffs"].extend(diffs); mem["runs"] += 1
-    mem["history"].append({"ts": int(time.time()), "ctx": ctx, "topic": t, "result": res["type"], "value": res.get("value")})
-    save_mem(mem)
-    return {"scenario": sc["id"], "events": ev, "resolution": res, "narrative": narrate(ev), "rule_hit": rule_hit,
+    memory.record_run(run_id, ctx, t, res, sc)
+    mem = load_mem()
+    return {"run_id": run_id, "scenario": sc["id"], "events": ev, "resolution": res, "narrative": narrate(ev), "rule_hit": rule_hit,
             "memory": mem, "topic": t, "context": ctx, "scenario_def": sc}
 
 def human(topic, value, context=None):
     mem = load_mem(); t = sym(topic); value = sym(value)
-    ctx = sym(context) if context else next((c for c, v in mem["ctx"].items() if t in v["learned"]), t)
-    cm = mem["ctx"].setdefault(ctx, {"reliability": {}, "learned": {}}); old = cm["learned"].get(t)
-    cm["learned"][t] = {"type": "concede", "value": value, "cond": "human", "version": (old["version"] + 1) if old else 1, "ts": int(time.time())}
-    mem["diffs"].append({"what": f"rule[{ctx}/{t}]", "old": old and old["value"], "new": f"human decision -> {value}"})
-    mem["history"].append({"ts": int(time.time()), "ctx": ctx, "topic": t, "result": "human", "value": value})
-    save_mem(mem); return mem
+    ctx = sym(context) if context else next((c for c, v in mem["ctx"].items() if t in v.get("learned", {})), t)
+    run_id = memory.generate_run_id()
+    memory.record_learned_rule(ctx, t, "concede", value, "human", run_id)
+    return load_mem()
 
 def narrate(ev):
     """Optional LLM prose; falls back to a template. LLM never decides anything."""
@@ -239,6 +239,6 @@ def parse_lines(text):
 
 def intake(text):
     """Free text -> validated scenario. LLM first, line-format fallback. The LLM never decides."""
-    if not text or len(text.strip()) < 10 or ":" not in text and " " not in text.strip():
+    if not text or len(text.strip().split()) < 3:
         return parse_lines(text)
     return _llm_json(text) or parse_lines(text)
