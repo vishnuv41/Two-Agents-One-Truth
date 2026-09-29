@@ -55,3 +55,13 @@ def test_five_rounds():
 def test_malformed_input():
     import pytest as p
     with p.raises(Exception): engine.validate({"topic": "x", "claims": {}, "evidence": []})
+
+def test_agent_system():
+    from core import agents
+    agent_list = agents.list_agents()
+    assert len(agent_list) == 2
+    ids = {a["id"] for a in agent_list}
+    assert ids == {"A", "B"}
+    assert agents.get_agent("A")["name"] == "Evidence Advocate"
+    assert agents.get_agent("B")["name"] == "Skeptical Auditor"
+

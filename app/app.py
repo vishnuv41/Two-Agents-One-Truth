@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from core import engine
+from core import engine, agents
 app = FastAPI(title="Two Agents, One Truth")
 @app.get("/")
 def index(): return FileResponse("static/index.html")
+@app.get("/agents")
+def get_agents(): return agents.list_agents()
 @app.get("/scenarios")
 def sc(): return [{"id": k, "title": v["title"]} for k, v in engine.scenarios().items()]
 @app.post("/run/{sid}")
