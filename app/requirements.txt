@@ -2,3 +2,5 @@ hyperon
 fastapi
 uvicorn
 pytest
+python-dotenv
+

@@ -1,5 +1,10 @@
 """Orchestrator. Python only moves data; every decision comes from core/weigh.metta."""
 import json, os, copy
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from hyperon import MeTTa
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEM = os.path.join(ROOT, "memory", "memory.json")
